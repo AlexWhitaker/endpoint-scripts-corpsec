@@ -1,0 +1,18 @@
+# Secrets — never commit these
+*.key
+*.pem
+.env
+secrets/
+
+# macOS
+.DS_Store
+
+# Python (mail_backup.py)
+__pycache__/
+*.pyc
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
