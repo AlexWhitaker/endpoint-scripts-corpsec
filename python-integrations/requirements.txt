@@ -1,0 +1,7 @@
+datadog-api-client
+requests
+pandas
+openpyxl
+jira
+tenacity
+pytz

@@ -1,8 +1,8 @@
-# security-tooling-scripts
+# endpoint-scripts-corpsec
 
-macOS shell scripts for endpoint security tool validation, deployment, and remediation. Covers Cisco Umbrella/Secure Client, CrowdStrike Falcon, Tenable Nessus Agent, and macOS system utilities.
+macOS shell scripts and Python integrations for endpoint security tool deployment, health monitoring, and platform-to-Datadog pipelines. Covers Cisco Umbrella, CrowdStrike Falcon, Tenable Nessus, Kandji MDM, and AirWatch.
 
-All scripts target macOS and are designed to run in MDM-managed environments (Kandji, Jamf).
+Scripts are designed to run in MDM-managed environments (Kandji, Jamf). Python integrations run as scheduled services or one-off analysis jobs.
 
 ---
 
@@ -105,28 +105,21 @@ sudo sh nessus/nessus_preinstall.sh
 Installs a Nessus Agent from a DMG and links it to Tenable Cloud. Takes credentials via environment variables (no hardcoded values).
 
 ```bash
-sudo TENABLE_LINKING_KEY=<key> NESSUS_AGENT_DMG=NessusAgent-10.6.1.dmg \
+sudo TENABLE_LINKING_KEY=<key> NESSUS_DMG=NessusAgent-10.6.1.dmg \
     sh nessus/nessus_postinstall.sh
 ```
 
 | Variable | Description |
 |---|---|
 | `TENABLE_LINKING_KEY` | Agent linking key from Tenable → Sensors |
-| `NESSUS_AGENT_DMG` | DMG filename placed in `/private/var/tmp/` |
+| `NESSUS_DMG` | DMG filename placed in `/private/var/tmp/` |
 
 ### `nessus_audit_enforce.sh`
 
-Compliance check that validates the Nessus Agent is:
-1. Installed at the expected path
-2. Running (`nessusd` process check)
-3. Linked to `sensor.cloud.tenable.com:443`
-
-Returns exit 0 on pass. Set `FORCE_REINSTALL=true` to trigger a reinstall path.
+Compliance check that validates the Nessus Agent is installed, running, and linked to `sensor.cloud.tenable.com:443`. Returns exit 0 on pass. Set `force_reinstall=true` in the script to trigger a reinstall path.
 
 ```bash
 sh nessus/nessus_audit_enforce.sh
-# Force reinstall
-FORCE_REINSTALL=true sh nessus/nessus_audit_enforce.sh
 ```
 
 ---
@@ -145,31 +138,68 @@ sudo sh macos-utilities/super_removal.sh
 
 ### `mail_backup.py`
 
-Backs up macOS Mail messages to a timestamped directory without touching originals. Recursively scans `~/Library/Mail/V9` for `.mbox` files and for each mailbox:
-- Exports individual messages as `.eml` files
-- Writes a `metadata.json` with subject, sender, recipient, and date
+Backs up macOS Mail messages to a timestamped directory without touching originals. Recursively scans `~/Library/Mail/V9` for `.mbox` files and exports individual messages as `.eml` files with a `metadata.json` per mailbox.
 
 ```bash
 python macos-utilities/mail_backup.py
-# Optional: specify output directory
-python -c "from mail_backup import backup_mac_mail; backup_mac_mail('/path/to/backup')"
 ```
+
+---
+
+## python-integrations
+
+Python integrations connecting enterprise security platforms to Datadog for unified device health monitoring, vulnerability management, and alert routing.
+
+```
+python-integrations/
+├── security_host_metrics/     Multi-platform device health pipeline → Datadog
+├── datadog_monitoring/        Log restriction monitor with Jira alerting
+├── mdm_integrations/          Kandji and Umbrella data pipelines
+├── vulnerability_management/  Nessus → Jira sync and agent deployment
+├── requirements.txt
+└── .env.example
+```
+
+### `security_host_metrics/`
+
+Base class + per-platform modules pull device status from CrowdStrike Falcon, Cisco Umbrella, Kandji, and VMware AirWatch, normalize into a common schema, and ship metrics to Datadog.
+
+### `datadog_monitoring/`
+
+Monitors Datadog log restriction policies for unauthorized changes. Classifies change type (query modified, roles modified) and opens a Jira ticket for security review.
+
+### `mdm_integrations/`
+
+- `kandji_client.py` — Production Kandji API client with retry logic and full device inventory pagination
+- `kandji_datadog_pipeline.py` — Polls Kandji and forwards device data to Datadog log intake
+- `umbrella_analysis.py` — Pulls all roaming computers from Umbrella, segments by status and sync recency, exports to Excel
+
+### `vulnerability_management/`
+
+- `jira_nessus_sync.py` — Reads Nessus scan findings and creates/updates Jira issues by hostname + plugin ID; handles PCI scans (medium+ severity) separately from standard (high/critical)
+- `nessus_agent_deploy.sh` — Installs and links Nessus Agent with timezone-based scanner group assignment
+
+### Setup
+
+```bash
+cd python-integrations
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# fill in credentials
+```
+
+All credentials are loaded from environment variables. See [`python-integrations/.env.example`](python-integrations/.env.example) for the full list.
 
 ---
 
 ## Requirements
 
-- macOS (all scripts)
+- macOS (all shell scripts)
 - Root/sudo privileges for install/uninstall scripts
-- Python 3.9+ for `mail_backup.py` (stdlib only, no dependencies)
-- Jamf Pro or similar MDM for Extension Attribute scripts (optional)
-
-## Usage in MDM
-
-The CrowdStrike scripts (`falcon_status.sh`, `falcon_last_seen.sh`) are formatted as Jamf Extension Attributes — the `<result>` tag wrapping is parsed directly by Jamf inventory.
-
-The Nessus lifecycle scripts (`nessus_preinstall.sh`, `nessus_postinstall.sh`, `nessus_audit_enforce.sh`) are designed as Kandji/Jamf custom scripts. Pass `TENABLE_LINKING_KEY` and `NESSUS_AGENT_DMG` via your MDM's script parameter fields.
+- Python 3.9+ for Python integrations
+- Jamf Pro or Kandji for MDM-deployed scripts (optional)
 
 ## Security
 
-None of these scripts contain hardcoded credentials. Sensitive values (Tenable linking key) are passed via environment variables. See `.env.example`.
+No hardcoded credentials anywhere in this repo. Sensitive values are passed via environment variables or script arguments. See `python-integrations/.env.example`.
